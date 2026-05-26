@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entsorgungsliste – Produzenten Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f5f5f0; color: #1a1a1a; padding: 2rem; }
+  h1 { font-size: 22px; font-weight: 500; color: #003f31; margin-bottom: 0.25rem; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 1.5rem; }
+  h2 { font-size: 15px; font-weight: 500; color: #003f31; margin-bottom: 1rem; }
+
+  .upload-zone { border: 1.5px dashed #b0c8c2; border-radius: 12px; padding: 1.5rem 2rem; text-align: center; background: #fff; margin-bottom: 2rem; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+  .upload-zone.drag { border-color: #003f31; background: #eaf3f0; }
+  .upload-zone .icon { font-size: 28px; margin-bottom: 0.4rem; }
+  .upload-zone .text { font-size: 14px; color: #555; }
+  .upload-zone .hint { font-size: 12px; color: #999; margin-top: 4px; }
+  .upload-zone input { display: none; }
+  .file-loaded { font-size: 12px; color: #003f31; margin-top: 8px; font-weight: 500; }
+
+  .dashboard { display: none; }
+  .dashboard.visible { display: block; }
+
+  .global-filter { background: #fff; border: 0.5px solid #ddd; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .global-filter .gf-label { font-size: 13px; font-weight: 500; color: #003f31; white-space: nowrap; }
+  .global-filter .gf-btns { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
+  .global-filter .gf-reset { font-size: 12px; color: #888; cursor: pointer; border: none; background: none; padding: 4px 8px; border-radius: 8px; white-space: nowrap; }
+  .global-filter .gf-reset:hover { background: #f0f0f0; color: #333; }
+
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 2rem; }
+  .metric { background: #fff; border: 0.5px solid #ddd; border-radius: 10px; padding: 1rem; }
+  .metric .label { font-size: 12px; color: #888; margin-bottom: 6px; }
+  .metric .value { font-size: 22px; font-weight: 500; color: #1a1a1a; }
+  .metric .sub { font-size: 12px; color: #888; margin-top: 2px; }
+  .metric.accent { border-left: 3px solid #003f31; }
+
+  .section { background: #fff; border: 0.5px solid #ddd; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .chart-wrap { position: relative; width: 100%; }
+
+  .clickable-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 1rem; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #555; cursor: pointer; padding: 4px 10px; border-radius: 20px; border: 0.5px solid #ddd; background: #fff; user-select: none; transition: opacity 0.15s; }
+  .legend-item.hidden { opacity: 0.35; text-decoration: line-through; }
+  .legend-item:hover { border-color: #aaa; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 1.25rem; }
+  .filter-btn { padding: 5px 12px; border: 0.5px solid #ccc; border-radius: 20px; background: #fff; font-size: 12px; cursor: pointer; color: #555; }
+  .filter-btn.active { background: #003f31; color: #fff; border-color: #003f31; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .prod-list { list-style: none; }
+  .prod-list li { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 0.5px solid #eee; font-size: 13px; }
+  .prod-list li:last-child { border-bottom: none; }
+  .prod-list .name { color: #333; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+  .prod-list .bar-wrap { flex: 0 0 80px; height: 6px; background: #f0f0f0; border-radius: 3px; margin-right: 8px; }
+  .prod-list .bar { height: 6px; border-radius: 3px; }
+  .prod-list .eur { font-weight: 500; color: #1a1a1a; min-width: 64px; text-align: right; }
+
+  .prod-filter-btn { padding: 5px 12px; border: 0.5px solid #ccc; border-radius: 20px; background: #fff; font-size: 12px; cursor: pointer; color: #555; }
+  .prod-filter-btn.active { background: #003f31; color: #fff; border-color: #003f31; }
+
+  .error-msg { background: #fff0f0; border: 0.5px solid #f5c1c1; border-radius: 8px; padding: 0.75rem 1rem; font-size: 13px; color: #a32d2d; margin-bottom: 1rem; display: none; }
+  .no-data { font-size: 13px; color: #999; padding: 1rem 0; text-align: center; }
+  @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } body { padding: 1rem; } .global-filter { flex-direction: column; align-items: flex-start; } }
+</style>
+</head>
+<body>
+
+<h1>Entsorgungsliste – Produzenten Dashboard</h1>
+<p class="subtitle" id="subtitle">3Bears Foods GmbH &middot; Zielstattstra&szlig;e 40, 81379 M&uuml;nchen</p>
+
+<div class="upload-zone" id="dropZone">
+  <div class="icon">📂</div>
+  <div class="text">Excel-Datei hier ablegen oder klicken zum Ausw&auml;hlen</div>
+  <div class="hint">Erwartet: Blatt &bdquo;Erfassungsliste&ldquo; mit Spalten KW &middot; SKU &middot; Produktname &middot; Kategorie / Produzent &middot; Menge &middot; Einheit &middot; Einkaufspreis &middot; Gesamtschaden</div>
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <div class="file-loaded" id="fileLoaded"></div>
+</div>
+
+<div class="error-msg" id="errorMsg"></div>
+
+<div class="dashboard" id="dashboard">
+
+  <div class="global-filter">
+    <span class="gf-label">Produzent:</span>
+    <div class="gf-btns" id="globalFilterBtns"></div>
+    <button class="gf-reset" id="gfReset">Alle anzeigen</button>
+  </div>
+
+  <div class="metric-grid" id="metricGrid"></div>
+
+  <div class="section">
+    <h2>Schadensanteil nach Produzent</h2>
+    <div class="clickable-legend" id="donutLegend"></div>
+    <div class="chart-wrap" style="height:280px;"><canvas id="donutChart" role="img" aria-label="Kreisdiagramm Schadensanteil je Produzent"></canvas></div>
+  </div>
+
+  <div class="section">
+    <h2>Schaden je Produzent nach Kalenderwoche</h2>
+    <div class="clickable-legend" id="lineLegend"></div>
+    <div class="filter-row" id="kwFilters"></div>
+    <div class="chart-wrap" style="height:280px;"><canvas id="lineChart" role="img" aria-label="Liniendiagramm Schaden je Produzent nach KW"></canvas></div>
+  </div>
+
+  <div class="two-col">
+    <div class="section">
+      <h2>Ranking nach Gesamtschaden</h2>
+      <ul class="prod-list" id="prodRanking"></ul>
+    </div>
+    <div class="section">
+      <h2>Top-Produkte nach Produzent</h2>
+      <div class="filter-row" id="prodFilters"></div>
+      <ul class="prod-list" id="topProducts"></ul>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const PALETTE = ['#003f31','#1D9E75','#5DCAA5','#BA7517','#888780','#378ADD','#D85A30','#533AB7','#D4537E','#639922'];
+let colorMap = {}, donutChart = null, lineChart = null;
+let activeProd = null, allKWs = [], activeKWIdxs = [];
+let kwData = {}, prodSummary = {}, topProducts = {};
+let allProdSet = [], activeProdSet = [];
+let hiddenLineProds = new Set();
+
+function fmt(v) { return '\u20ac' + v.toFixed(2).replace('.', ','); }
+function pct(v, t) { return t > 0 ? (v / t * 100).toFixed(1) + '\u00a0%' : '0\u00a0%'; }
+function showError(m) { const e = document.getElementById('errorMsg'); e.textContent = m; e.style.display = 'block'; }
+function hideError() { document.getElementById('errorMsg').style.display = 'none'; }
+
+function parseExcel(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      hideError();
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const sheetName = wb.SheetNames.find(n => n.trim() === 'Erfassungsliste');
+      if (!sheetName) { showError('Blatt \u201eErfassungsliste\u201c nicht gefunden.'); return; }
+      const ws = wb.Sheets[sheetName];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+      let headerRow = -1;
+      for (let i = 0; i < Math.min(raw.length, 10); i++) {
+        if (raw[i] && raw[i].some(c => c && String(c).toLowerCase().includes('sku'))) { headerRow = i; break; }
+      }
+      if (headerRow === -1) { showError('Kopfzeile mit \u201eSKU\u201c nicht gefunden.'); return; }
+      const headers = raw[headerRow].map(h => h ? String(h).trim().toLowerCase() : '');
+      const idx = {
+        kw: headers.findIndex(h => h === 'kw'),
+        sku: headers.findIndex(h => h.includes('sku')),
+        name: headers.findIndex(h => h.includes('produktname')),
+        prod: headers.findIndex(h => h.includes('produzent') || h.includes('kategorie')),
+        menge: headers.findIndex(h => h.includes('menge')),
+        gs: headers.findIndex(h => h.includes('gesamtschaden'))
+      };
+      if (idx.kw === -1 || idx.prod === -1 || idx.gs === -1) { showError('Pflichtspalten nicht gefunden.'); return; }
+      const rows = [];
+      for (let i = headerRow + 1; i < raw.length; i++) {
+        const r = raw[i];
+        if (!r) continue;
+        const kw = r[idx.kw], sku = r[idx.sku];
+        if (!kw || !sku || String(kw).toLowerCase().includes('gesamt')) continue;
+        const gs = parseFloat(r[idx.gs]) || 0;
+        const menge = parseFloat(r[idx.menge]) || 0;
+        const prod = (r[idx.prod] && String(r[idx.prod]).trim()) || 'DS Smith';
+        const name = r[idx.name] ? String(r[idx.name]).trim() : String(sku);
+        rows.push({ kw: String(kw).trim(), prod, menge, gs, name });
+      }
+      if (rows.length === 0) { showError('Keine Datenzeilen gefunden.'); return; }
+      initData(rows);
+      document.getElementById('dashboard').classList.add('visible');
+      document.getElementById('fileLoaded').textContent = '\u2713 ' + file.name + ' geladen (' + rows.length + ' Zeilen)';
+    } catch(err) { showError('Fehler: ' + err.message); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+let _allRows = [];
+
+function initData(rows) {
+  _allRows = rows;
+  allProdSet = [...new Set(rows.map(r => r.prod))].sort((a, b) => {
+    return rows.filter(r => r.prod === b).reduce((s,r) => s+r.gs,0) - rows.filter(r => r.prod === a).reduce((s,r) => s+r.gs,0);
+  });
+  colorMap = {};
+  allProdSet.forEach((p, i) => colorMap[p] = PALETTE[i % PALETTE.length]);
+  allKWs = [...new Set(rows.map(r => r.kw))].sort((a,b) => parseInt(a)-parseInt(b));
+  activeKWIdxs = allKWs.map((_,i) => i);
+  activeProdSet = [...allProdSet];
+  hiddenLineProds = new Set();
+  activeProd = allProdSet[0];
+  buildGlobalFilter();
+  rebuildAll();
+}
+
+function buildGlobalFilter() {
+  const c = document.getElementById('globalFilterBtns');
+  c.innerHTML = '';
+  allProdSet.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn active';
+    btn.textContent = p;
+    btn.dataset.prod = p;
+    btn.style.borderColor = colorMap[p];
+    btn.onclick = () => toggleGlobalProd(p);
+    c.appendChild(btn);
+  });
+  document.getElementById('gfReset').onclick = () => {
+    activeProdSet = [...allProdSet];
+    document.querySelectorAll('#globalFilterBtns .filter-btn').forEach(b => b.classList.add('active'));
+    hiddenLineProds = new Set();
+    rebuildAll();
+  };
+}
+
+function toggleGlobalProd(p) {
+  if (activeProdSet.includes(p) && activeProdSet.length === 1) return;
+  if (activeProdSet.includes(p)) {
+    activeProdSet = activeProdSet.filter(x => x !== p);
+  } else {
+    activeProdSet = allProdSet.filter(x => activeProdSet.includes(x) || x === p);
+  }
+  document.querySelectorAll('#globalFilterBtns .filter-btn').forEach(btn => {
+    btn.classList.toggle('active', activeProdSet.includes(btn.dataset.prod));
+  });
+  hiddenLineProds = new Set([...hiddenLineProds].filter(x => activeProdSet.includes(x)));
+  if (activeProd && !activeProdSet.includes(activeProd)) activeProd = activeProdSet[0];
+  rebuildAll();
+}
+
+function rebuildAll() {
+  const rows = _allRows.filter(r => activeProdSet.includes(r.prod));
+  prodSummary = {};
+  activeProdSet.forEach(p => {
+    const pr = rows.filter(r => r.prod === p);
+    prodSummary[p] = { positionen: pr.length, menge: pr.reduce((s,r)=>s+r.menge,0), schaden: pr.reduce((s,r)=>s+r.gs,0) };
+  });
+  kwData = {};
+  activeProdSet.forEach(p => { kwData[p] = allKWs.map(kw => rows.filter(r=>r.prod===p&&r.kw===kw).reduce((s,r)=>s+r.gs,0)); });
+  topProducts = {};
+  activeProdSet.forEach(p => {
+    const m = {};
+    rows.filter(r=>r.prod===p).forEach(r => { m[r.name]=(m[r.name]||0)+r.gs; });
+    topProducts[p] = Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name,val])=>({name,val}));
+  });
+  const total = Object.values(prodSummary).reduce((s,v)=>s+v.schaden,0);
+  const totalMenge = Object.values(prodSummary).reduce((s,v)=>s+v.menge,0);
+  const totalPos = Object.values(prodSummary).reduce((s,v)=>s+v.positionen,0);
+  const topP = activeProdSet[0];
+  const kwRange = allKWs.length > 1 ? 'KW\u00a0'+allKWs[0]+'\u2013'+allKWs[allKWs.length-1] : 'KW\u00a0'+allKWs[0];
+  document.getElementById('subtitle').textContent = '3Bears Foods GmbH \u00b7 '+kwRange+' \u00b7 Gesamtschaden: '+fmt(total);
+  document.getElementById('metricGrid').innerHTML =
+    `<div class="metric accent"><div class="label">Gesamtschaden</div><div class="value">${fmt(total)}</div><div class="sub">${kwRange}</div></div>
+     <div class="metric"><div class="label">Produzenten</div><div class="value">${activeProdSet.length}</div><div class="sub">aktive Lieferanten</div></div>
+     <div class="metric"><div class="label">Positionen</div><div class="value">${totalPos}</div><div class="sub">Entsorgungen gesamt</div></div>
+     <div class="metric"><div class="label">St\u00fcckzahl</div><div class="value">${totalMenge}</div><div class="sub">Einheiten entsorgt</div></div>
+     <div class="metric"><div class="label">Gr\u00f6\u00dfter Anteil</div><div class="value">${topP ? pct(prodSummary[topP].schaden, total) : '-'}</div><div class="sub">${topP||'-'}</div></div>`;
+  renderDonut(total);
+  renderLine();
+  renderKWFilters();
+  renderRanking(total);
+  renderProdFilters();
+  renderTopProducts();
+}
+
+function renderDonut(total) {
+  const legend = document.getElementById('donutLegend');
+  legend.innerHTML = '';
+  activeProdSet.forEach(p => {
+    const item = document.createElement('span');
+    item.className = 'legend-item';
+    item.innerHTML = `<span class="legend-dot" style="background:${colorMap[p]}"></span>${p} &ndash; ${pct(prodSummary[p].schaden, total)}`;
+    legend.appendChild(item);
+  });
+  if (donutChart) donutChart.destroy();
+  donutChart = new Chart(document.getElementById('donutChart').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: activeProdSet,
+      datasets: [{ data: activeProdSet.map(p=>prodSummary[p].schaden), backgroundColor: activeProdSet.map(p=>colorMap[p]), borderWidth: 2, borderColor: '#fff', hoverOffset: 6 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${fmt(ctx.parsed)} (${pct(ctx.parsed, ctx.dataset.data.reduce((a,b)=>a+b,0))})` } } } }
+  });
+}
+
+function renderLine() {
+  const legend = document.getElementById('lineLegend');
+  legend.innerHTML = '';
+  activeProdSet.forEach(p => {
+    const item = document.createElement('span');
+    item.className = 'legend-item' + (hiddenLineProds.has(p) ? ' hidden' : '');
+    item.innerHTML = `<span class="legend-dot" style="background:${colorMap[p]}"></span>${p}`;
+    item.onclick = () => {
+      if (hiddenLineProds.has(p)) { hiddenLineProds.delete(p); item.classList.remove('hidden'); }
+      else if (activeProdSet.filter(x => !hiddenLineProds.has(x)).length > 1) { hiddenLineProds.add(p); item.classList.add('hidden'); }
+      const dsIdx = activeProdSet.indexOf(p);
+      if (lineChart) { lineChart.data.datasets[dsIdx].hidden = hiddenLineProds.has(p); lineChart.update(); }
+    };
+    legend.appendChild(item);
+  });
+  const visibleKWs = activeKWIdxs.map(i => allKWs[i]);
+  if (lineChart) lineChart.destroy();
+  lineChart = new Chart(document.getElementById('lineChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: visibleKWs.map(k => 'KW\u00a0'+k),
+      datasets: activeProdSet.map(p => ({
+        label: p, data: activeKWIdxs.map(i => kwData[p][i]),
+        borderColor: colorMap[p], backgroundColor: colorMap[p]+'22',
+        borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, tension: 0.3, fill: false,
+        hidden: hiddenLineProds.has(p)
+      }))
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: v => '\u20ac'+v }, grid: { color: '#f0f0f0' } },
+        x: { grid: { display: false }, ticks: { autoSkip: false, maxRotation: 0, font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function renderKWFilters() {
+  const c = document.getElementById('kwFilters');
+  c.innerHTML = '';
+  allKWs.forEach((kw, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn' + (activeKWIdxs.includes(i) ? ' active' : '');
+    btn.textContent = 'KW\u00a0'+kw;
+    btn.onclick = () => {
+      if (activeKWIdxs.includes(i) && activeKWIdxs.length === 1) return;
+      if (activeKWIdxs.includes(i)) activeKWIdxs = activeKWIdxs.filter(x => x !== i);
+      else activeKWIdxs = [...activeKWIdxs, i].sort((a,b)=>a-b);
+      btn.classList.toggle('active', activeKWIdxs.includes(i));
+      if (lineChart) {
+        const visKWs = activeKWIdxs.map(idx => allKWs[idx]);
+        lineChart.data.labels = visKWs.map(k => 'KW\u00a0'+k);
+        lineChart.data.datasets.forEach((ds, di) => { ds.data = activeKWIdxs.map(idx => kwData[activeProdSet[di]][idx]); });
+        lineChart.update();
+      }
+    };
+    c.appendChild(btn);
+  });
+}
+
+function renderRanking(total) {
+  const max = Math.max(...activeProdSet.map(p=>prodSummary[p].schaden));
+  document.getElementById('prodRanking').innerHTML = [...activeProdSet]
+    .sort((a,b) => prodSummary[b].schaden - prodSummary[a].schaden)
+    .map(p => `<li><span class="name">${p}</span><div class="bar-wrap"><div class="bar" style="width:${(prodSummary[p].schaden/max*100).toFixed(1)}%;background:${colorMap[p]}"></div></div><span class="eur">${fmt(prodSummary[p].schaden)}</span></li>`)
+    .join('');
+}
+
+function renderProdFilters() {
+  const c = document.getElementById('prodFilters');
+  c.innerHTML = '';
+  activeProdSet.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'prod-filter-btn' + (p === activeProd ? ' active' : '');
+    btn.textContent = p;
+    btn.onclick = () => { c.querySelectorAll('.prod-filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); activeProd = p; renderTopProducts(); };
+    c.appendChild(btn);
+  });
+}
+
+function renderTopProducts() {
+  const items = topProducts[activeProd] || [];
+  const max = items.length ? items[0].val : 1;
+  document.getElementById('topProducts').innerHTML = items.length
+    ? items.map(item => `<li><span class="name" title="${item.name}">${item.name}</span><div class="bar-wrap"><div class="bar" style="width:${(item.val/max*100).toFixed(1)}%;background:${colorMap[activeProd]}"></div></div><span class="eur">${fmt(item.val)}</span></li>`).join('')
+    : '<li class="no-data">Keine Daten</li>';
+}
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if (e.target.files[0]) parseExcel(e.target.files[0]); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag'); if (e.dataTransfer.files[0]) parseExcel(e.dataTransfer.files[0]); });
+</script>
+</body>
+</html>
